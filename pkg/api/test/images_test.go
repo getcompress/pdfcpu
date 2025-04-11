@@ -26,7 +26,7 @@ import (
 func testUpdateImages(t *testing.T, msg string, inFile, imgFile, outFile string, objNr, pageNr int, id string) {
 	t.Helper()
 
-	if err := api.UpdateImagesFile(inFile, imgFile, outFile, objNr, pageNr, id, conf); err != nil {
+	if err := api.UpdateImagesFile(inFile, imgFile, outFile, objNr, pageNr, id, conf, nil); err != nil {
 		t.Fatalf("%s %s: %v\n", msg, outFile, err)
 	}
 	if err := api.ValidateFile(outFile, conf); err != nil {

@@ -58,7 +58,7 @@ func Images(rs io.ReadSeeker, selectedPages []string, conf *model.Configuration)
 }
 
 // UpdateImages replaces the XObject identified by objNr or (pageNr and resourceId).
-func UpdateImages(rs io.ReadSeeker, rd io.Reader, w io.Writer, objNr, pageNr int, id string, conf *model.Configuration) (err error) {
+func UpdateImages(rs io.ReadSeeker, rd io.Reader, w io.Writer, objNr, pageNr int, id string, conf *model.Configuration, knownImageConfig *model.KnownImageConfig) (err error) {
 	defer fault.Catch(&err)
 
 	if rs == nil {
@@ -76,7 +76,7 @@ func UpdateImages(rs io.ReadSeeker, rd io.Reader, w io.Writer, objNr, pageNr int
 	}
 
 	if objNr > 0 {
-		if err := pdfcpu.UpdateImagesByObjNr(ctx, rd, objNr); err != nil {
+		if err := pdfcpu.UpdateImagesByObjNr(ctx, rd, objNr, knownImageConfig); err != nil {
 			return err
 		}
 
@@ -87,7 +87,7 @@ func UpdateImages(rs io.ReadSeeker, rd io.Reader, w io.Writer, objNr, pageNr int
 		return errors.New("pdfcpu: UpdateImages: missing pageNr or id ")
 	}
 
-	if err := pdfcpu.UpdateImagesByPageNrAndId(ctx, rd, pageNr, id); err != nil {
+	if err := pdfcpu.UpdateImagesByPageNrAndId(ctx, rd, pageNr, id, knownImageConfig); err != nil {
 		return err
 	}
 
@@ -121,7 +121,7 @@ func ensurePageNrAndId(pageNr *int, id *string, imageFile string) (err error) {
 }
 
 // UpdateImagesFile replaces the XObject identified by objNr or (pageNr and resourceId).
-func UpdateImagesFile(inFile, imageFile, outFile string, objNr, pageNr int, id string, conf *model.Configuration) (err error) {
+func UpdateImagesFile(inFile, imageFile, outFile string, objNr, pageNr int, id string, conf *model.Configuration, knownImageConfig *model.KnownImageConfig) (err error) {
 
 	if objNr < 1 {
 		if err = ensurePageNrAndId(&pageNr, &id, imageFile); err != nil {
@@ -175,7 +175,7 @@ func UpdateImagesFile(inFile, imageFile, outFile string, objNr, pageNr int, id s
 		}
 	}()
 
-	if err = UpdateImages(f0, f1, f2, objNr, pageNr, id, conf); err != nil {
+	if err = UpdateImages(f0, f1, f2, objNr, pageNr, id, conf, knownImageConfig); err != nil {
 		return err
 	}
 

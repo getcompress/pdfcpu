@@ -547,7 +547,7 @@ func BookletFromImages(ctx *model.Context, fileNames []string, nup *model.NUp, p
 			return err
 		}
 
-		imgIndRef, w, h, err := model.CreateImageResource(xRefTable, f)
+		imgIndRef, w, h, err := model.CreateImageResource(xRefTable, f, nil)
 		if err != nil {
 			return err
 		}

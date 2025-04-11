@@ -617,3 +617,22 @@ func (c *Configuration) ApplyReducedFeatureSet() bool {
 	}
 	return false
 }
+
+// KnownImageConfig can be used if the image format and dimensions are already known
+// to avoid decoding the image sometimes (e.g. JPEG2000 (JPX)).
+type KnownImageConfig struct {
+	// Image format, e.g. jpeg, png, tiff or jpx
+	Format string
+
+	Width  int
+	Height int
+}
+
+// NewKnownImageConfig returns a new KnownImageConfig.
+func NewKnownImageConfig(format string, width, height int) *KnownImageConfig {
+	return &KnownImageConfig{
+		Format: format,
+		Width:  width,
+		Height: height,
+	}
+}

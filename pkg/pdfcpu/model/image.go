@@ -159,6 +159,54 @@ func CreateFlateImageStreamDict(xRefTable *XRefTable, buf, sm []byte, w, h, bpc 
 	return sd, nil
 }
 
+// CreateJPXImageStreamDict returns a JPXDecode stream dict.
+func CreateJPXImageStreamDict(jpxData []byte, w, h int) (*types.StreamDict, error) {
+	streamLength := int64(len(jpxData))
+
+	sd := &types.StreamDict{
+		Dict: types.Dict(map[string]types.Object{
+			"Type":    types.Name("XObject"),
+			"Subtype": types.Name("Image"),
+			"Width":   types.Integer(w),
+			"Height":  types.Integer(h),
+			"Filter":  types.Name(filter.JPX),
+
+			// ColorSpace: shall be optional since JPEG2000 data contain colour space specifications.
+			// PDF32000-1:2008, 7.4.9
+
+			// BitsPerComponent: If the image stream uses the JPXDecode filter, this entry is optional and shall be ignored if present.
+			// PDF32000-1:2008, 8.9.5.1, Table 89
+
+			// SMask: If this entry (SMaskInData) has a nonzero value, SMask shall not be specified.
+			// PDF32000-1:2008, 8.9.5.1, Table 89
+
+			// 0 - ignore alpha in the image and use SMask
+			// 1 - use image file encoded soft-mask values (must be a simple separate alpha channel)
+			// 2 - use image file colour channels preblended with a background, including alpha channel
+			// PDF32000-1:2008, 8.9.5.1, Table 89
+			"SMaskInData": types.Integer(1),
+		}),
+		Content:        jpxData,
+		StreamLength:   &streamLength,
+		FilterPipeline: nil,
+	}
+
+	if w < 1000 || h < 1000 {
+		sd.Insert("Interpolate", types.Boolean(true))
+	}
+
+	// Calling Encode without FilterPipeline ensures an encoded stream in sd.Raw.
+	if err := sd.Encode(); err != nil {
+		return nil, err
+	}
+
+	sd.Content = nil
+
+	sd.FilterPipeline = []types.PDFFilter{{Name: filter.JPX, DecodeParms: nil}}
+
+	return sd, nil
+}
+
 // CreateDCTImageStreamDict returns a DCT encoded stream dict.
 func CreateDCTImageStreamDict(xRefTable *XRefTable, buf []byte, w, h, bpc int, cs string) (*types.StreamDict, error) {
 	sd := &types.StreamDict{
@@ -542,17 +590,15 @@ func convertToSepia(img image.Image) *image.RGBA {
 }
 
 func createImageStreamDict(xRefTable *XRefTable, buf, softMask []byte, w, h, bpc int, format, cs string) (*types.StreamDict, error) {
-	var (
-		sd  *types.StreamDict
-		err error
-	)
-	switch format {
-	case "jpeg":
-		sd, err = CreateDCTImageStreamDict(xRefTable, buf, w, h, bpc, cs)
-	default:
-		sd, err = CreateFlateImageStreamDict(xRefTable, buf, softMask, w, h, bpc, cs)
+	if format == "jpeg" {
+		return CreateDCTImageStreamDict(xRefTable, buf, w, h, bpc, cs)
 	}
-	return sd, err
+
+	if isJPXFormat(format) {
+		return CreateJPXImageStreamDict(buf, w, h)
+	}
+
+	return CreateFlateImageStreamDict(xRefTable, buf, softMask, w, h, bpc, cs)
 }
 
 func encodeJPEG(img image.Image) ([]byte, string, error) {
@@ -661,7 +707,11 @@ func handleCMYKImage(img *image.CMYK) ([]byte, []byte, int, string, error) {
 	return buf, nil, 8, DeviceCMYKCS, nil
 }
 
-func createImageBuf(xRefTable *XRefTable, img image.Image, imgA image.Image, format string) ([]byte, []byte, int, string, error) {
+func createImageBuf(xRefTable *XRefTable, img image.Image, imgA image.Image, format string, originalBytes []byte) ([]byte, []byte, int, string, error) {
+	if isJPXFormat(format) {
+		return originalBytes, nil, 0, "", nil
+	}
+
 	if format == "jpeg" {
 		bb, cs, err := encodeJPEG(img)
 		return bb, nil, 8, cs, err
@@ -742,7 +792,7 @@ func decodeImage(xRefTable *XRefTable, buf *bytes.Reader, currentOffset int64, g
 		}
 	}
 
-	imgBuf, softMask, bpc, cs, err := createImageBuf(xRefTable, img, nil, "tiff")
+	imgBuf, softMask, bpc, cs, err := createImageBuf(xRefTable, img, nil, "tiff", nil)
 	if err != nil {
 		return 0, err
 	}
@@ -827,7 +877,15 @@ func createImageResourcesForTIFF(xRefTable *XRefTable, bb bytes.Buffer, gray, se
 	return imgResources, nil
 }
 
-func createImageResources(xRefTable *XRefTable, c image.Config, bb bytes.Buffer, gray, sepia bool) ([]ImageResource, error) {
+func createImageResources(xRefTable *XRefTable, c image.Config, bb bytes.Buffer, gray, sepia bool, format string) ([]ImageResource, error) {
+	var originalBytes []byte
+
+	if isJPXFormat(format) {
+		originalBytes = bb.Bytes()
+	} else {
+		originalBytes = nil
+	}
+
 	img, format, err := image.Decode(&bb)
 	if err != nil {
 		return nil, err
@@ -849,7 +907,7 @@ func createImageResources(xRefTable *XRefTable, c image.Config, bb bytes.Buffer,
 		}
 	}
 
-	imgBuf, softMask, bpc, cs, err := createImageBuf(xRefTable, img, nil, format)
+	imgBuf, softMask, bpc, cs, err := createImageBuf(xRefTable, img, nil, format, originalBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -898,19 +956,43 @@ func CreateImageResources(xRefTable *XRefTable, r io.Reader, gray, sepia bool) (
 		return createImageResourcesForJPEG(xRefTable, c, bb)
 	}
 
-	return createImageResources(xRefTable, c, bb, gray, sepia)
+	return createImageResources(xRefTable, c, bb, gray, sepia, format)
 }
 
-func CreateImageStreamDict(xRefTable *XRefTable, r io.Reader) (*types.StreamDict, int, int, error) {
+// CreateImageStreamDict returns a stream dict for image data represented by r and applies optional filters.
+func CreateImageStreamDict(xRefTable *XRefTable, r io.Reader, knownImageConfig *KnownImageConfig) (*types.StreamDict, int, int, error) {
 	var bb bytes.Buffer
+
 	if _, err := io.Copy(&bb, r); err != nil {
 		return nil, 0, 0, err
 	}
+
 	data := bb.Bytes()
+
+	// Fast path to avoid decoding JPX when dimensions are supplied by the caller.
+	if knownImageConfig != nil && isJPXFormat(knownImageConfig.Format) {
+		if knownImageConfig.Width <= 0 || knownImageConfig.Height <= 0 {
+			return nil, 0, 0, errors.New("pdfcpu: invalid arg image width or height")
+		}
+
+		sd, err := CreateJPXImageStreamDict(data, knownImageConfig.Width, knownImageConfig.Height)
+		if err != nil {
+			return nil, 0, 0, err
+		}
+		return sd, knownImageConfig.Width, knownImageConfig.Height, nil
+	}
 
 	c, format, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
 		return nil, 0, 0, err
+	}
+
+	if isJPXFormat(format) {
+		sd, err := CreateJPXImageStreamDict(data, c.Width, c.Height)
+		if err != nil {
+			return nil, 0, 0, err
+		}
+		return sd, c.Width, c.Height, nil
 	}
 
 	img, _, err := image.Decode(bytes.NewReader(data))
@@ -947,7 +1029,7 @@ func CreateImageStreamDict(xRefTable *XRefTable, r io.Reader) (*types.StreamDict
 		}
 	}
 
-	imgBuf, softMask, bpc, cs, err := createImageBuf(xRefTable, img, imgA, format)
+	imgBuf, softMask, bpc, cs, err := createImageBuf(xRefTable, img, imgA, format, nil)
 	if err != nil {
 		return nil, 0, 0, err
 	}
@@ -976,11 +1058,16 @@ func hasAlpha(cm color.Model) bool {
 }
 
 // CreateImageResource creates a new XObject for given image data represented by r and applies optional filters.
-func CreateImageResource(xRefTable *XRefTable, r io.Reader) (*types.IndirectRef, int, int, error) {
-	sd, w, h, err := CreateImageStreamDict(xRefTable, r)
+func CreateImageResource(xRefTable *XRefTable, r io.Reader, knownImageConfig *KnownImageConfig) (*types.IndirectRef, int, int, error) {
+	sd, w, h, err := CreateImageStreamDict(xRefTable, r, knownImageConfig)
 	if err != nil {
 		return nil, 0, 0, err
 	}
 	indRef, err := xRefTable.IndRefForNewObject(*sd)
 	return indRef, w, h, err
+}
+
+// isJPXFormat checks for all supported JPEG2000 (JPX) formats for JPXDecode
+func isJPXFormat(format string) bool {
+	return format == "jp2" || format == "j2k" || format == "j2c" || format == "jpx"
 }
