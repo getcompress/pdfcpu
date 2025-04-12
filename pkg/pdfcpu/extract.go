@@ -411,12 +411,25 @@ func img(
 		return nil, err
 	}
 
+	var width, height int
+	rawWidth := sd.Dict.IntEntry("Width")
+	rawHeight := sd.Dict.IntEntry("Height")
+
+	if rawWidth != nil {
+		width = *rawWidth
+	}
+	if rawHeight != nil {
+		height = *rawHeight
+	}
+
 	img := &model.Image{
 		Reader:   r,
 		Name:     resourceID,
 		ObjNr:    objNr,
 		Thumb:    thumb,
 		FileType: t,
+		Width:    width,
+		Height:   height,
 	}
 
 	return img, nil
