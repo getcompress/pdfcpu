@@ -603,7 +603,7 @@ func validateFormStreamDictPart1(xRefTable *model.XRefTable, sd *types.StreamDic
 		return err
 	}
 
-	_, err = validateRectangleEntry(xRefTable, sd.Dict, dictName, "BBox", REQUIRED, model.V10, nil)
+	_, err = validateRectangleEntry(xRefTable, sd.Dict, dictName, "BBox", xRefTable.ValidationMode != model.ValidationRelaxed, model.V10, nil)
 	if err != nil {
 		return err
 	}
