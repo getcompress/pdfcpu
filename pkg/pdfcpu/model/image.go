@@ -208,7 +208,7 @@ func CreateJPXImageStreamDict(jpxData []byte, w, h int) (*types.StreamDict, erro
 }
 
 // CreateDCTImageStreamDict returns a DCT encoded stream dict.
-func CreateDCTImageStreamDict(xRefTable *XRefTable, buf []byte, w, h, bpc int, cs string) (*types.StreamDict, error) {
+func CreateDCTImageStreamDict(xRefTable *XRefTable, buf []byte, w, h, bpc int, cs string, existingSoftMask *types.IndirectRef) (*types.StreamDict, error) {
 	sd := &types.StreamDict{
 		Dict: types.Dict(
 			map[string]types.Object{
@@ -222,6 +222,10 @@ func CreateDCTImageStreamDict(xRefTable *XRefTable, buf []byte, w, h, bpc int, c
 		),
 		Content:        buf,
 		FilterPipeline: nil,
+	}
+
+	if existingSoftMask != nil {
+		sd.Insert("SMask", *existingSoftMask)
 	}
 
 	if cs == DeviceCMYKCS {
@@ -589,9 +593,9 @@ func convertToSepia(img image.Image) *image.RGBA {
 	return m
 }
 
-func createImageStreamDict(xRefTable *XRefTable, buf, softMask []byte, w, h, bpc int, format, cs string) (*types.StreamDict, error) {
+func createImageStreamDict(xRefTable *XRefTable, buf, softMask []byte, w, h, bpc int, format, cs string, existingSoftMask *types.IndirectRef) (*types.StreamDict, error) {
 	if format == "jpeg" {
-		return CreateDCTImageStreamDict(xRefTable, buf, w, h, bpc, cs)
+		return CreateDCTImageStreamDict(xRefTable, buf, w, h, bpc, cs, existingSoftMask)
 	}
 
 	if isJPXFormat(format) {
@@ -745,17 +749,17 @@ func colorSpaceForJPEGColorModel(cm color.Model) string {
 	return ""
 }
 
-func createDCTImageStreamDictForJPEG(xRefTable *XRefTable, c image.Config, bb bytes.Buffer) (*types.StreamDict, error) {
+func createDCTImageStreamDictForJPEG(xRefTable *XRefTable, c image.Config, bb bytes.Buffer, existingSoftMask *types.IndirectRef) (*types.StreamDict, error) {
 	cs := colorSpaceForJPEGColorModel(c.ColorModel)
 	if cs == "" {
 		return nil, errors.New("pdfcpu: unexpected color model for JPEG")
 	}
 
-	return CreateDCTImageStreamDict(xRefTable, bb.Bytes(), c.Width, c.Height, 8, cs)
+	return CreateDCTImageStreamDict(xRefTable, bb.Bytes(), c.Width, c.Height, 8, cs, existingSoftMask)
 }
 
-func createImageResourcesForJPEG(xRefTable *XRefTable, c image.Config, bb bytes.Buffer) ([]ImageResource, error) {
-	sd, err := createDCTImageStreamDictForJPEG(xRefTable, c, bb)
+func createImageResourcesForJPEG(xRefTable *XRefTable, c image.Config, bb bytes.Buffer, existingSoftMask *types.IndirectRef) ([]ImageResource, error) {
+	sd, err := createDCTImageStreamDictForJPEG(xRefTable, c, bb, existingSoftMask)
 	if err != nil {
 		return nil, err
 	}
@@ -799,7 +803,7 @@ func decodeImage(xRefTable *XRefTable, buf *bytes.Reader, currentOffset int64, g
 
 	w, h := img.Bounds().Dx(), img.Bounds().Dy()
 
-	sd, err := createImageStreamDict(xRefTable, imgBuf, softMask, w, h, bpc, "tiff", cs)
+	sd, err := createImageStreamDict(xRefTable, imgBuf, softMask, w, h, bpc, "tiff", cs, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -917,7 +921,7 @@ func createImageResources(xRefTable *XRefTable, c image.Config, bb bytes.Buffer,
 		return nil, errors.New("pdfcpu: unexpected width or height")
 	}
 
-	sd, err := createImageStreamDict(xRefTable, imgBuf, softMask, w, h, bpc, format, cs)
+	sd, err := createImageStreamDict(xRefTable, imgBuf, softMask, w, h, bpc, format, cs, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -953,7 +957,7 @@ func CreateImageResources(xRefTable *XRefTable, r io.Reader, gray, sepia bool) (
 	}
 
 	if format == "jpeg" && !gray && !sepia {
-		return createImageResourcesForJPEG(xRefTable, c, bb)
+		return createImageResourcesForJPEG(xRefTable, c, bb, nil)
 	}
 
 	return createImageResources(xRefTable, c, bb, gray, sepia, format)
@@ -995,6 +999,11 @@ func CreateImageStreamDict(xRefTable *XRefTable, r io.Reader, knownImageConfig *
 		return sd, c.Width, c.Height, nil
 	}
 
+	var existingSoftMask *types.IndirectRef
+	if knownImageConfig != nil && knownImageConfig.ExistingSoftMask != nil {
+		existingSoftMask = knownImageConfig.ExistingSoftMask
+	}
+
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, 0, 0, err
@@ -1008,7 +1017,7 @@ func CreateImageStreamDict(xRefTable *XRefTable, r io.Reader, knownImageConfig *
 	gray := checkIfGray(img)
 
 	if format == "jpeg" && !gray {
-		sd, err := createDCTImageStreamDictForJPEG(xRefTable, c, bb)
+		sd, err := createDCTImageStreamDictForJPEG(xRefTable, c, bb, existingSoftMask)
 		if err != nil {
 			return nil, 0, 0, err
 		}
@@ -1034,7 +1043,7 @@ func CreateImageStreamDict(xRefTable *XRefTable, r io.Reader, knownImageConfig *
 		return nil, 0, 0, err
 	}
 
-	sd, err := createImageStreamDict(xRefTable, imgBuf, softMask, w, h, bpc, format, cs)
+	sd, err := createImageStreamDict(xRefTable, imgBuf, softMask, w, h, bpc, format, cs, existingSoftMask)
 	if err != nil {
 		return nil, 0, 0, err
 	}

@@ -626,13 +626,16 @@ type KnownImageConfig struct {
 
 	Width  int
 	Height int
+
+	ExistingSoftMask *types.IndirectRef
 }
 
 // NewKnownImageConfig returns a new KnownImageConfig.
-func NewKnownImageConfig(format string, width, height int) *KnownImageConfig {
+func NewKnownImageConfig(format string, width, height int, existingSoftMask *types.IndirectRef) *KnownImageConfig {
 	return &KnownImageConfig{
-		Format: format,
-		Width:  width,
-		Height: height,
+		Format:           format,
+		Width:            width,
+		Height:           height,
+		ExistingSoftMask: existingSoftMask,
 	}
 }

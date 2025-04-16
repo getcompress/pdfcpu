@@ -87,7 +87,7 @@ func streamDictForJPGFile(xRefTable *model.XRefTable, fileName string) (*types.S
 
 	}
 
-	sd, err := model.CreateDCTImageStreamDict(xRefTable, bb, c.Width, c.Height, 8, cs)
+	sd, err := model.CreateDCTImageStreamDict(xRefTable, bb, c.Width, c.Height, 8, cs, nil)
 	if err != nil {
 		return nil, err
 	}
